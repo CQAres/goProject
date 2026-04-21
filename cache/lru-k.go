@@ -1,8 +1,8 @@
-package lru
+package cache
 
 import "container/list"
 
-type Cache struct {
+type LruCache struct {
 	maxBytes      int64
 	nbytes        int64
 	k             int
@@ -22,8 +22,8 @@ type Value interface {
 	Len() int
 }
 
-func NewCache(maxBytes int64, K int, onEvicted func(string, Value)) *Cache {
-	return &Cache{
+func NewCache(maxBytes int64, K int, onEvicted func(string, Value)) *LruCache {
+	return &LruCache{
 		maxBytes:      maxBytes,
 		k:             K,
 		cachelistMain: list.New(),
@@ -34,7 +34,7 @@ func NewCache(maxBytes int64, K int, onEvicted func(string, Value)) *Cache {
 	}
 }
 
-func (c *Cache) promote(key string, ele *list.Element) {
+func (c *LruCache) promote(key string, ele *list.Element) {
 	// 1. 从 subList 移除
 	c.cachelistSub.Remove(ele)
 
@@ -45,7 +45,7 @@ func (c *Cache) promote(key string, ele *list.Element) {
 	c.cache[key] = newEle
 }
 
-func (c *Cache) Get(key string) (value Value, ok bool) {
+func (c *LruCache) Get(key string) (value Value, ok bool) {
 	ele, exists := c.cache[key]
 	if !exists {
 		return nil, false
@@ -65,7 +65,7 @@ func (c *Cache) Get(key string) (value Value, ok bool) {
 	return kv.value, true
 }
 
-func (c *Cache) delete(cacheList *list.List, ele *list.Element) {
+func (c *LruCache) delete(cacheList *list.List, ele *list.Element) {
 	cacheList.Remove(ele)
 	kv := ele.Value.(*entry)
 	delete(c.cache, kv.key)
@@ -76,7 +76,7 @@ func (c *Cache) delete(cacheList *list.List, ele *list.Element) {
 	}
 }
 
-func (c *Cache) Remove() {
+func (c *LruCache) Remove() {
 	// 优先淘汰 subList（访问频率低）
 	if ele := c.cachelistSub.Back(); ele != nil {
 		c.delete(c.cachelistSub, ele)
@@ -88,7 +88,7 @@ func (c *Cache) Remove() {
 	}
 }
 
-func (c *Cache) Add(key string, value Value) {
+func (c *LruCache) Add(key string, value Value) {
 	if ele, ok := c.cache[key]; ok {
 		c.history[key]++
 		if c.history[key] == c.k {
@@ -115,6 +115,16 @@ func (c *Cache) Add(key string, value Value) {
 	}
 }
 
-func (c *Cache) Len() int {
+func (c *LruCache) Len() int {
 	return c.cachelistMain.Len() + c.cachelistSub.Len()
+}
+
+type Getter interface {
+	Get(key string) ([]byte, error)
+}
+
+type GetterFunc func(key string) ([]byte, error)
+
+func (f GetterFunc) Get(key string) ([]byte, error) {
+	return f(key)
 }
