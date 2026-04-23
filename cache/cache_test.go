@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	lru2 "goProject/cache/lru"
 	"reflect"
 	"testing"
 )
@@ -16,7 +17,7 @@ func (d String) Len() int {
 
 func TestLRUGet(t *testing.T) {
 	// K=1 表示普通 LRU（所有 key 都在 mainList）
-	lru := NewCache(0, 1, nil)
+	lru := lru2.NewCache(0, 1, nil)
 	lru.Add("key1", String("1234"))
 	if v, ok := lru.Get("key1"); !ok || string(v.(String)) != "1234" {
 		t.Fatalf("cache hit key1=1234 failed")
@@ -33,7 +34,7 @@ func TestRemove(t *testing.T) {
 	// 计算前两个 key-value 的总字节数（作为容量上限）
 	capacity := int64(len(k1) + len(v1) + len(k2) + len(v2))
 
-	lru := NewCache(capacity, 1, nil) // K=1，普通 LRU
+	lru := lru2.NewCache(capacity, 1, nil) // K=1，普通 LRU
 
 	lru.Add(k1, String(v1))
 	lru.Add(k2, String(v2))
@@ -63,12 +64,12 @@ func TestRemove(t *testing.T) {
 
 func TestOnEvicted(t *testing.T) {
 	keys := make([]string, 0)
-	callback := func(key string, value Value) {
+	callback := func(key string, value lru2.Value) {
 		keys = append(keys, key)
 	}
 
 	// 设置容量为 10 字节
-	lru := NewCache(10, 1, callback) // K=1
+	lru := lru2.NewCache(10, 1, callback) // K=1
 
 	// "key1" + "123456" = 4 + 6 = 10 → 刚好填满
 	lru.Add("key1", String("123456")) // 4+6=10
@@ -92,7 +93,7 @@ func TestOnEvicted(t *testing.T) {
 
 func TestLRUKPromote(t *testing.T) {
 	evicted := make([]string, 0)
-	lru := NewCache(100, 2, func(k string, v Value) {
+	lru := lru2.NewCache(100, 2, func(k string, v lru2.Value) {
 		evicted = append(evicted, k)
 	})
 
@@ -101,10 +102,10 @@ func TestLRUKPromote(t *testing.T) {
 	lru.Get("a") // 第2次访问（history=2 == K，晋升到 main）
 
 	// 此时 "a" 应在 mainList
-	if lru.cachelistSub.Len() != 0 {
+	if lru.CachelistSub.Len() != 0 {
 		t.Errorf("sub list should be empty after promotion")
 	}
-	if lru.cachelistMain.Len() != 1 {
+	if lru.CachelistMain.Len() != 1 {
 		t.Errorf("main list should have 1 element")
 	}
 }
@@ -112,7 +113,7 @@ func TestLRUKPromote(t *testing.T) {
 // ======================= 测试cache ============================
 
 func TestGetter(t *testing.T) {
-	var f Getter = GetterFunc(func(key string) ([]byte, error) {
+	var f lru2.Getter = lru2.GetterFunc(func(key string) ([]byte, error) {
 		return []byte(key), nil
 	})
 
@@ -129,7 +130,7 @@ func TestGroupGet(t *testing.T) {
 		"Sam":  "567",
 	}
 	loadCounts := make(map[string]int, len(testData))
-	group := RegisterGroup("scores", 2<<10, GetterFunc(
+	group := RegisterGroup("scores", 2<<10, lru2.GetterFunc(
 		func(key string) ([]byte, error) {
 			// 模拟 db 耗时操作
 			fmt.Println("[SlowDB] search key", key)

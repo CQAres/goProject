@@ -2,40 +2,42 @@ package cache
 
 import (
 	"fmt"
+	lru2 "goProject/cache/lru"
+	"goProject/cache/util"
 	"log"
 	"sync"
 )
 
 type cache struct {
 	mutex      sync.Mutex
-	lru        *LruCache
+	lru        *lru2.LruCache
 	cacheBytes int64
 }
 
-func (c *cache) add(key string, k int, value ByteView) {
+func (c *cache) add(key string, k int, value util.ByteView) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if c.lru == nil {
-		c.lru = NewCache(c.cacheBytes, k, nil)
+		c.lru = lru2.NewCache(c.cacheBytes, k, nil)
 	}
 	c.lru.Add(key, value)
 }
 
-func (c *cache) get(key string) (value ByteView, ok bool) {
+func (c *cache) get(key string) (value util.ByteView, ok bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if c.lru == nil {
 		return
 	}
 	if v, ok := c.lru.Get(key); ok {
-		return v.(ByteView), ok
+		return v.(util.ByteView), ok
 	}
 	return
 }
 
 type Group struct {
 	name      string
-	getter    Getter
+	getter    lru2.Getter
 	mainCache cache
 }
 
@@ -44,7 +46,7 @@ var (
 	groups = make(map[string]*Group)
 )
 
-func RegisterGroup(name string, cacheBytes int64, getter Getter) *Group {
+func RegisterGroup(name string, cacheBytes int64, getter lru2.Getter) *Group {
 	if getter == nil {
 		panic("cache: getter is nil")
 	}
@@ -66,9 +68,9 @@ func GetGroup(name string) *Group {
 	return g
 }
 
-func (g *Group) Get(key string) (ByteView, error) {
+func (g *Group) Get(key string) (util.ByteView, error) {
 	if key == "" {
-		return ByteView{}, fmt.Errorf("key is required")
+		return util.ByteView{}, fmt.Errorf("key is required")
 	}
 
 	if v, ok := g.mainCache.get(key); ok {
@@ -79,20 +81,20 @@ func (g *Group) Get(key string) (ByteView, error) {
 	return g.load(key)
 }
 
-func (g *Group) load(key string) (value ByteView, err error) {
+func (g *Group) load(key string) (value util.ByteView, err error) {
 	return g.getLocally(key)
 }
 
-func (g *Group) getLocally(key string) (ByteView, error) {
+func (g *Group) getLocally(key string) (util.ByteView, error) {
 	bytes, err := g.getter.Get(key)
 	if err != nil {
-		return ByteView{}, err
+		return util.ByteView{}, err
 	}
-	value := ByteView{b: cloneBytes(bytes)}
+	value := util.ByteView{B: util.CloneBytes(bytes)}
 	g.populateCache(key, value)
 	return value, nil
 }
 
-func (g *Group) populateCache(key string, value ByteView) {
+func (g *Group) populateCache(key string, value util.ByteView) {
 	g.mainCache.add(key, 5, value)
 }

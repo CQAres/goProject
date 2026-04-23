@@ -1,7 +1,9 @@
-package cache
+package http
 
 import (
 	"fmt"
+	"goProject/cache"
+	"goProject/cache/lru"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +18,7 @@ func TestHTTP(t *testing.T) {
 	}
 
 	groupName := "test-group"
-	RegisterGroup(groupName, 2<<10, GetterFunc(
+	cache.RegisterGroup(groupName, 2<<10, lru.GetterFunc(
 		func(key string) ([]byte, error) {
 			log.Println("[SlowDB] search key", key)
 			if v, ok := http_db[key]; ok {
