@@ -46,6 +46,32 @@ func isZeroArray(nums []int, queries [][]int) bool {
 	return true
 }
 
+func minKBitFlips(nums []int, k int) int {
+	n := len(nums)
+	diff := make([]int, n+k)
+	prefix := 0
+	res := 0 // 翻转次数
+	for i := range nums {
+		prefix += diff[i]
+
+		current := nums[i]
+		if prefix%2 == 1 {
+			current ^= 1 // 翻转
+		}
+
+		if current == 0 {
+			// 需要翻转
+			if i+k > n {
+				return -1
+			}
+			prefix++
+			diff[i+k]--
+			res++
+		}
+	}
+	return res
+}
+
 func main() {
 	s := "gopher"
 	fmt.Printf("Hello and welcome, %s!\n", s)

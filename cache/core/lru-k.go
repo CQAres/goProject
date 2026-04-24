@@ -1,4 +1,4 @@
-package lru
+package core
 
 import "container/list"
 
@@ -9,7 +9,7 @@ type LruCache struct {
 	CachelistMain *list.List // >=k次的主缓存
 	CachelistSub  *list.List // <k次
 	cache         map[string]*list.Element
-	history       map[string]int                // lru-k次
+	history       map[string]int                // core-k次
 	OnEvicted     func(key string, value Value) // 缓存被移除时的回调
 }
 

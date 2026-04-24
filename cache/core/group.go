@@ -1,44 +1,17 @@
-package cache
+package core
 
 import (
 	"fmt"
-	lru2 "goProject/cache/lru"
 	"goProject/cache/util"
 	"log"
 	"sync"
 )
 
-type cache struct {
-	mutex      sync.Mutex
-	lru        *lru2.LruCache
-	cacheBytes int64
-}
-
-func (c *cache) add(key string, k int, value util.ByteView) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	if c.lru == nil {
-		c.lru = lru2.NewCache(c.cacheBytes, k, nil)
-	}
-	c.lru.Add(key, value)
-}
-
-func (c *cache) get(key string) (value util.ByteView, ok bool) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	if c.lru == nil {
-		return
-	}
-	if v, ok := c.lru.Get(key); ok {
-		return v.(util.ByteView), ok
-	}
-	return
-}
-
 type Group struct {
 	name      string
-	getter    lru2.Getter
+	getter    Getter
 	mainCache cache
+	peers     util.PeerPicker
 }
 
 var (
@@ -46,7 +19,7 @@ var (
 	groups = make(map[string]*Group)
 )
 
-func RegisterGroup(name string, cacheBytes int64, getter lru2.Getter) *Group {
+func RegisterGroup(name string, cacheBytes int64, getter Getter) *Group {
 	if getter == nil {
 		panic("cache: getter is nil")
 	}
