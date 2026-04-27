@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"goProject/cache/protobuff"
 	"goProject/cache/util"
 	"log"
 	"sync"
@@ -98,9 +99,14 @@ func (g *Group) RegisterPeers(peers util.PeerPicker) {
 }
 
 func (g *Group) getFromPeer(peer util.PeerGetter, key string) (util.ByteView, error) {
-	bytes, err := peer.Get(g.name, key)
+	req := &protobuff.Request{
+		Group: g.name,
+		Key:   key,
+	}
+	res := &protobuff.Response{}
+	err := peer.Get(req, res)
 	if err != nil {
 		return util.ByteView{}, err
 	}
-	return util.ByteView{B: bytes}, nil
+	return util.ByteView{B: res.Value}, nil
 }

@@ -1,6 +1,7 @@
 package util
 
 import "sync"
+import "goProject/cache/protobuff"
 
 type ByteView struct {
 	B []byte
@@ -29,7 +30,7 @@ type PeerPicker interface {
 }
 
 type PeerGetter interface {
-	Get(group string, key string) ([]byte, error)
+	Get(in *protobuff.Request, out *protobuff.Response) error
 }
 
 type call struct {

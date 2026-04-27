@@ -2,6 +2,7 @@ package core
 
 import "container/list"
 
+// 底层lru-k
 type LruCache struct {
 	maxBytes      int64
 	nbytes        int64

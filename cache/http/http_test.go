@@ -1,10 +1,13 @@
 package http
 
 import (
+	"context"
 	"fmt"
 	"goProject/cache/core"
+	"goProject/cache/protobuff"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +15,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 var db = map[string]string{
@@ -31,110 +38,173 @@ func createGroup(name string, cacheBytes int64) *core.Group {
 		}))
 }
 
-// ======================= 测试单节点缓存服务器 =======================
+// ======================= gRPC 测试辅助函数 =======================
 
-func TestHTTPSingleServer(t *testing.T) {
+// 创建 gRPC 测试服务器
+type grpcServer struct {
+	protobuff.UnimplementedGroupCacheServer
+	group *core.Group
+}
+
+func (s *grpcServer) Get(ctx context.Context, req *protobuff.Request) (*protobuff.Response, error) {
+	group := core.GetGroup(req.Group)
+	if group == nil {
+		return nil, fmt.Errorf("no such group: %s", req.Group)
+	}
+	view, err := group.Get(req.Key)
+	if err != nil {
+		return nil, err
+	}
+	return &protobuff.Response{Value: view.ByteSlice()}, nil
+}
+
+// 用于测试的 gRPC getter
+type testGRPCGetter struct {
+	client protobuff.GroupCacheClient
+}
+
+func (g *testGRPCGetter) Get(in *protobuff.Request, out *protobuff.Response) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := g.client.Get(ctx, in)
+	if err != nil {
+		return err
+	}
+	out.Value = resp.Value
+	return nil
+}
+
+// 启动 gRPC 测试服务器
+func startTestGRPCServer(group *core.Group) (*grpc.Server, *bufconn.Listener) {
+	lis := bufconn.Listen(1024 * 1024)
+	s := grpc.NewServer()
+	protobuff.RegisterGroupCacheServer(s, &grpcServer{group: group})
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			log.Printf("Server exited with error: %v", err)
+		}
+	}()
+	return s, lis
+}
+
+// 创建 gRPC 客户端连接
+func createGRPCConn(lis *bufconn.Listener) (*grpc.ClientConn, error) {
+	return grpc.DialContext(context.Background(), "passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return lis.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+}
+
+// ======================= 测试单节点 gRPC 服务器 =======================
+
+func TestGRPCSingleServer(t *testing.T) {
 	groupName := "scores"
 	gee := createGroup(groupName, 2<<10)
 
-	pool := NewHTTPPool("http://localhost:8001")
-	ts := httptest.NewServer(pool)
-	defer ts.Close()
+	// 启动 gRPC 服务器
+	s, lis := startTestGRPCServer(gee)
+	defer s.Stop()
+
+	// 创建客户端
+	conn, err := createGRPCConn(lis)
+	if err != nil {
+		t.Fatalf("failed to create connection: %v", err)
+	}
+	defer conn.Close()
+
+	client := protobuff.NewGroupCacheClient(conn)
 
 	// 测试正常获取
 	t.Run("get existing key", func(t *testing.T) {
-		url := fmt.Sprintf("%s/cache/%s/Tom", ts.URL, groupName)
-		resp, err := http.Get(url)
+		resp, err := client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "Tom",
+		})
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected status 200, got %d", resp.StatusCode)
-		}
-
-		body, _ := io.ReadAll(resp.Body)
-		if string(body) != "630" {
-			t.Errorf("expected body '630', got %q", string(body))
+		if string(resp.Value) != "630" {
+			t.Errorf("expected value '630', got %q", string(resp.Value))
 		}
 	})
 
 	// 测试缓存命中
 	t.Run("cache hit", func(t *testing.T) {
 		// 第一次获取，触发加载
-		url := fmt.Sprintf("%s/cache/%s/Jack", ts.URL, groupName)
-		http.Get(url)
+		client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "Jack",
+		})
 		// 第二次获取，应该命中缓存
-		resp, err := http.Get(url)
+		resp, err := client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "Jack",
+		})
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected status 200, got %d", resp.StatusCode)
+		if string(resp.Value) != "589" {
+			t.Errorf("expected value '589', got %q", string(resp.Value))
 		}
 	})
 
 	// 测试不存在的key
 	t.Run("key not exist", func(t *testing.T) {
-		url := fmt.Sprintf("%s/cache/%s/Unknown", ts.URL, groupName)
-		resp, err := http.Get(url)
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusInternalServerError {
-			t.Errorf("expected status 500, got %d", resp.StatusCode)
+		_, err := client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "Unknown",
+		})
+		if err == nil {
+			t.Errorf("expected error for non-existent key")
 		}
 	})
 
 	// 测试不存在的group
 	t.Run("group not exist", func(t *testing.T) {
-		url := fmt.Sprintf("%s/cache/invalidgroup/key", ts.URL)
-		resp, err := http.Get(url)
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusNotFound {
-			t.Errorf("expected status 404, got %d", resp.StatusCode)
+		_, err := client.Get(context.Background(), &protobuff.Request{
+			Group: "invalidgroup",
+			Key:   "key",
+		})
+		if err == nil {
+			t.Errorf("expected error for non-existent group")
 		}
 	})
-
-	// 测试URL格式错误
-	t.Run("bad url format", func(t *testing.T) {
-		url := fmt.Sprintf("%s/cache/onlygroup", ts.URL)
-		resp, err := http.Get(url)
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Errorf("expected status 400, got %d", resp.StatusCode)
-		}
-	})
-
-	// 清理
-	_ = gee
 }
 
-// ======================= 测试API服务器 =======================
+// ======================= 测试API服务器 (HTTP + gRPC客户端) =======================
 
-func TestAPIServer(t *testing.T) {
+func TestAPIServerWithGRPC(t *testing.T) {
 	groupName := "scores"
 	gee := createGroup(groupName, 2<<10)
 
-	// 创建 API 服务器
+	// 启动 gRPC 服务器
+	s, lis := startTestGRPCServer(gee)
+	defer s.Stop()
+
+	// 创建 gRPC 客户端
+	conn, err := createGRPCConn(lis)
+	if err != nil {
+		t.Fatalf("failed to create connection: %v", err)
+	}
+	defer conn.Close()
+
+	client := protobuff.NewGroupCacheClient(conn)
+
+	// 创建 API 服务器 (HTTP)
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Query().Get("key")
-		view, err := gee.Get(key)
+		resp, err := client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   key,
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(view.ByteSlice())
+		w.Write(resp.Value)
 	})
 
 	ts := httptest.NewServer(apiHandler)
@@ -176,41 +246,32 @@ func TestAPIServer(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		// 应该返回错误，因为key参数为空
 		if resp.StatusCode != http.StatusInternalServerError {
 			t.Errorf("expected status 500, got %d", resp.StatusCode)
 		}
 	})
 }
 
-// ======================= 测试多节点分布式缓存 =======================
+// ======================= 测试多节点分布式缓存 (gRPC) =======================
 
-func TestHTTPDistributedCache(t *testing.T) {
+func TestGRPCDistributedCache(t *testing.T) {
 	const (
 		groupName  = "scores"
 		cacheBytes = 2 << 10
 	)
 
 	// 创建多个缓存节点
-	addrMap := map[string]string{
-		"8001": "http://localhost:8001",
-		"8002": "http://localhost:8002",
-		"8003": "http://localhost:8003",
-	}
+	addrs := []string{"localhost:8001", "localhost:8002", "localhost:8003"}
 
-	var addrs []string
-	for _, v := range addrMap {
-		addrs = append(addrs, v)
-	}
-
-	// 为每个节点创建服务器
 	type node struct {
 		pool  *HTTPPool
 		ts    *httptest.Server
 		group *core.Group
+		lis   *bufconn.Listener
+		grpc  *grpc.Server
 	}
 
-	nodes := make([]*node, len(addrMap))
+	nodes := make([]*node, len(addrs))
 	for i, addr := range addrs {
 		gee := core.RegisterGroup(groupName, cacheBytes, core.GetterFunc(
 			func(key string) ([]byte, error) {
@@ -222,49 +283,64 @@ func TestHTTPDistributedCache(t *testing.T) {
 			}))
 
 		pool := NewHTTPPool(addr)
-		pool.Set(addrs...) // 设置所有节点为peer
+		pool.Set(addrs...)
 
-		ts := httptest.NewServer(pool)
-		nodes[i] = &node{pool: pool, ts: ts, group: gee}
+		// 启动 gRPC 服务器
+		s, lis := startTestGRPCServer(gee)
+
+		nodes[i] = &node{pool: pool, group: gee, lis: lis, grpc: s}
 	}
 
 	// 清理函数
 	defer func() {
 		for _, n := range nodes {
-			n.ts.Close()
+			n.grpc.Stop()
 		}
 	}()
 
-	// 测试直接HTTP请求
-	t.Run("direct http request to node", func(t *testing.T) {
-		url := fmt.Sprintf("%s/cache/%s/Tom", nodes[0].ts.URL, groupName)
-		resp, err := http.Get(url)
+	// 测试 gRPC 请求
+	t.Run("grpc request to node", func(t *testing.T) {
+		conn, err := createGRPCConn(nodes[0].lis)
+		if err != nil {
+			t.Fatalf("failed to create connection: %v", err)
+		}
+		defer conn.Close()
+
+		client := protobuff.NewGroupCacheClient(conn)
+		resp, err := client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "Tom",
+		})
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected status 200, got %d", resp.StatusCode)
-		}
-
-		body, _ := io.ReadAll(resp.Body)
-		if string(body) != "630" {
-			t.Errorf("expected body '630', got %q", string(body))
+		if string(resp.Value) != "630" {
+			t.Errorf("expected value '630', got %q", string(resp.Value))
 		}
 	})
 
 	// 测试通过API服务器访问
 	t.Run("api server with distributed cache", func(t *testing.T) {
+		conn, err := createGRPCConn(nodes[0].lis)
+		if err != nil {
+			t.Fatalf("failed to create connection: %v", err)
+		}
+		defer conn.Close()
+
+		client := protobuff.NewGroupCacheClient(conn)
+
 		apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := r.URL.Query().Get("key")
-			view, err := nodes[0].group.Get(key)
+			resp, err := client.Get(context.Background(), &protobuff.Request{
+				Group: groupName,
+				Key:   key,
+			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Write(view.ByteSlice())
+			w.Write(resp.Value)
 		})
 
 		apiTs := httptest.NewServer(apiHandler)
@@ -293,12 +369,6 @@ func TestPickPeer(t *testing.T) {
 
 	pool1.Set("http://localhost:8001", "http://localhost:8002", "http://localhost:8003")
 	pool2.Set("http://localhost:8001", "http://localhost:8002", "http://localhost:8003")
-
-	// 创建测试服务器
-	ts1 := httptest.NewServer(pool1)
-	ts2 := httptest.NewServer(pool2)
-	defer ts1.Close()
-	defer ts2.Close()
 
 	// 注册 group
 	core.RegisterGroup(groupName, 2<<10, core.GetterFunc(
@@ -342,9 +412,11 @@ func TestPickPeer(t *testing.T) {
 			peer, ok := pool.PickPeer(key)
 			if ok && peer != nil {
 				foundPeer = true
-				// 验证 peer 可以获取数据
-				data, err := peer.Get(groupName, "Tom")
-				if err == nil && string(data) == "630" {
+				// 验证 peer 可以获取数据 (使用 protobuf 接口)
+				req := &protobuff.Request{Group: groupName, Key: "Tom"}
+				resp := &protobuff.Response{}
+				err := peer.Get(req, resp)
+				if err == nil && string(resp.Value) == "630" {
 					t.Logf("key %s: successfully got data through peer", key)
 				}
 			}
@@ -366,17 +438,19 @@ func TestPickPeer(t *testing.T) {
 	})
 }
 
-// ======================= 测试并发访问 =======================
+// ======================= 测试并发访问 (gRPC) =======================
 
-func TestConcurrentAccess(t *testing.T) {
+func TestGRPCConcurrentAccess(t *testing.T) {
 	const (
 		groupName  = "scores"
 		numWorkers = 100
 	)
 
-	pool := NewHTTPPool("http://localhost:8001")
-	ts := httptest.NewServer(pool)
-	defer ts.Close()
+	gee := createGroup(groupName, 2<<10)
+
+	// 启动 gRPC 服务器
+	s, lis := startTestGRPCServer(gee)
+	defer s.Stop()
 
 	var wg sync.WaitGroup
 	errors := make(chan error, numWorkers)
@@ -386,6 +460,16 @@ func TestConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
+			// 每个 goroutine 创建自己的连接
+			conn, err := createGRPCConn(lis)
+			if err != nil {
+				errors <- fmt.Errorf("worker %d: failed to connect: %v", id, err)
+				return
+			}
+			defer conn.Close()
+
+			client := protobuff.NewGroupCacheClient(conn)
+
 			key := "Tom"
 			if id%3 == 0 {
 				key = "Jack"
@@ -393,25 +477,18 @@ func TestConcurrentAccess(t *testing.T) {
 				key = "Sam"
 			}
 
-			// 通过HTTP访问
-			url := fmt.Sprintf("%s/cache/%s/%s", ts.URL, groupName, key)
-			resp, err := http.Get(url)
+			resp, err := client.Get(context.Background(), &protobuff.Request{
+				Group: groupName,
+				Key:   key,
+			})
 			if err != nil {
 				errors <- fmt.Errorf("worker %d: %v", id, err)
 				return
 			}
-			defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusOK {
-				errors <- fmt.Errorf("worker %d: status %d", id, resp.StatusCode)
-				return
-			}
-
-			// 验证返回值
-			body, _ := io.ReadAll(resp.Body)
 			expected := db[key]
-			if string(body) != expected {
-				errors <- fmt.Errorf("worker %d: expected %s, got %s", id, expected, string(body))
+			if string(resp.Value) != expected {
+				errors <- fmt.Errorf("worker %d: expected %s, got %s", id, expected, string(resp.Value))
 			}
 		}(i)
 	}
@@ -457,94 +534,79 @@ func TestHTTPPoolSet(t *testing.T) {
 	})
 }
 
-// ======================= 测试 URL 编码 =======================
+// ======================= 测试 gRPC 流控和超时 =======================
 
-func TestURLEncoding(t *testing.T) {
-	groupName := "scores"
-	gee := core.RegisterGroup(groupName, 2<<10, core.GetterFunc(
-		func(key string) ([]byte, error) {
-			if v, ok := db[key]; ok {
-				return []byte(v), nil
-			}
-			return nil, fmt.Errorf("%s not exist", key)
-		}))
-
-	pool := NewHTTPPool("http://localhost:8001")
-	ts := httptest.NewServer(pool)
-	defer ts.Close()
-
-	t.Run("key with special characters", func(t *testing.T) {
-		// 测试 URL 编码的 key
-		encodedKey := url.QueryEscape("Tom")
-		urlStr := fmt.Sprintf("%s/cache/%s/%s", ts.URL, groupName, encodedKey)
-		resp, err := http.Get(urlStr)
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected status 200, got %d", resp.StatusCode)
-		}
-	})
-
-	t.Run("key with space", func(t *testing.T) {
-		// 注册包含空格的 key
-		core.RegisterGroup("space-test", 2<<10, core.GetterFunc(
-			func(key string) ([]byte, error) {
-				return []byte("value_with_space"), nil
-			}))
-
-		encodedKey := url.QueryEscape("key with space")
-		urlStr := fmt.Sprintf("%s/cache/space-test/%s", ts.URL, encodedKey)
-		resp, err := http.Get(urlStr)
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected status 200, got %d", resp.StatusCode)
-		}
-	})
-
-	_ = gee
-}
-
-// ======================= 测试响应头 =======================
-
-func TestResponseHeaders(t *testing.T) {
+func TestGRPCTimeout(t *testing.T) {
 	groupName := "scores"
 	gee := createGroup(groupName, 2<<10)
-	pool := NewHTTPPool("http://localhost:8001")
-	ts := httptest.NewServer(pool)
-	defer ts.Close()
 
-	url := fmt.Sprintf("%s/cache/%s/Tom", ts.URL, groupName)
-	resp, err := http.Get(url)
+	// 启动 gRPC 服务器
+	s, lis := startTestGRPCServer(gee)
+	defer s.Stop()
+
+	conn, err := createGRPCConn(lis)
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		t.Fatalf("failed to create connection: %v", err)
 	}
-	defer resp.Body.Close()
+	defer conn.Close()
 
-	// 验证 Content-Type
-	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
-		t.Errorf("expected Content-Type 'application/octet-stream', got %q", ct)
-	}
+	client := protobuff.NewGroupCacheClient(conn)
 
-	// 验证可以正常读取 body
-	body, err := io.ReadAll(resp.Body)
+	// 测试带超时的请求
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.Get(ctx, &protobuff.Request{
+		Group: groupName,
+		Key:   "Tom",
+	})
 	if err != nil {
-		t.Errorf("failed to read body: %v", err)
+		t.Fatalf("request with timeout failed: %v", err)
 	}
-	if string(body) != "630" {
-		t.Errorf("expected '630', got %q", string(body))
+	if string(resp.Value) != "630" {
+		t.Errorf("expected value '630', got %q", string(resp.Value))
 	}
-
-	_ = gee
 }
 
 // ======================= 性能测试 =======================
+
+func BenchmarkGRPCGet(b *testing.B) {
+	groupName := "scores"
+	gee := createGroup(groupName, 2<<10)
+
+	// 启动 gRPC 服务器
+	s, lis := startTestGRPCServer(gee)
+	defer s.Stop()
+
+	conn, err := createGRPCConn(lis)
+	if err != nil {
+		b.Fatalf("failed to create connection: %v", err)
+	}
+	defer conn.Close()
+
+	client := protobuff.NewGroupCacheClient(conn)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "Tom",
+		})
+		if err != nil {
+			b.Fatalf("request failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkCacheGet(b *testing.B) {
+	groupName := "scores"
+	gee := createGroup(groupName, 2<<10)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		gee.Get("Tom")
+	}
+}
 
 func BenchmarkHTTPGet(b *testing.B) {
 	groupName := "scores"
@@ -564,16 +626,6 @@ func BenchmarkHTTPGet(b *testing.B) {
 	}
 }
 
-func BenchmarkCacheGet(b *testing.B) {
-	groupName := "scores"
-	gee := createGroup(groupName, 2<<10)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		gee.Get("Tom")
-	}
-}
-
 // ======================= 辅助：等待服务器启动 =======================
 
 func waitForServer(addr string, timeout time.Duration) error {
@@ -589,9 +641,9 @@ func waitForServer(addr string, timeout time.Duration) error {
 	return fmt.Errorf("server not ready within %v", timeout)
 }
 
-// ======================= 集成测试：完整流程 =======================
+// ======================= 集成测试：完整流程 (gRPC) =======================
 
-func TestFullIntegration(t *testing.T) {
+func TestGRPCFullIntegration(t *testing.T) {
 	const (
 		groupName  = "integration-test"
 		cacheBytes = 2 << 10
@@ -607,63 +659,102 @@ func TestFullIntegration(t *testing.T) {
 			return nil, fmt.Errorf("%s not exist", key)
 		}))
 
-	// 2. 创建多个缓存节点
-	peers := []string{"http://localhost:8001", "http://localhost:8002", "http://localhost:8003"}
+	// 2. 启动 gRPC 服务器
+	s, lis := startTestGRPCServer(gee)
+	defer s.Stop()
 
-	pool := NewHTTPPool("http://localhost:8001")
-	pool.Set(peers...)
+	// 3. 创建 gRPC 客户端
+	conn, err := createGRPCConn(lis)
+	if err != nil {
+		t.Fatalf("failed to create connection: %v", err)
+	}
+	defer conn.Close()
 
-	// 3. 创建 HTTP 测试服务器
-	ts := httptest.NewServer(pool)
-	defer ts.Close()
+	client := protobuff.NewGroupCacheClient(conn)
 
 	// 4. 测试完整流程
 	testKeys := []string{"Tom", "Jack", "Sam"}
 
 	for _, key := range testKeys {
 		t.Run(fmt.Sprintf("key_%s", key), func(t *testing.T) {
-			// 通过 HTTP 获取
-			url := fmt.Sprintf("%s/cache/%s/%s", ts.URL, groupName, key)
-			resp, err := http.Get(url)
+			resp, err := client.Get(context.Background(), &protobuff.Request{
+				Group: groupName,
+				Key:   key,
+			})
 			if err != nil {
-				t.Fatalf("HTTP request failed: %v", err)
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("expected status 200, got %d", resp.StatusCode)
+				t.Fatalf("gRPC request failed: %v", err)
 			}
 
-			body, _ := io.ReadAll(resp.Body)
 			expected := db[key]
-			if string(body) != expected {
-				t.Errorf("expected %q, got %q", expected, string(body))
+			if string(resp.Value) != expected {
+				t.Errorf("expected %q, got %q", expected, string(resp.Value))
 			}
 		})
 	}
 
 	// 5. 验证缓存命中（第二次访问不应触发DB）
 	t.Run("cache hit", func(t *testing.T) {
-		url := fmt.Sprintf("%s/cache/%s/Tom", ts.URL, groupName)
 		// 第一次
-		http.Get(url)
+		client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "Tom",
+		})
 		// 第二次 - 应该命中缓存
-		resp, err := http.Get(url)
+		resp, err := client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "Tom",
+		})
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		if string(resp.Value) != "630" {
+			t.Errorf("expected '630', got %q", string(resp.Value))
+		}
+	})
+}
 
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected status 200, got %d", resp.StatusCode)
+// ======================= 测试 gRPC 错误处理 =======================
+
+func TestGRPCErrorHandling(t *testing.T) {
+	groupName := "scores"
+	gee := createGroup(groupName, 2<<10)
+
+	// 启动 gRPC 服务器
+	s, lis := startTestGRPCServer(gee)
+	defer s.Stop()
+
+	conn, err := createGRPCConn(lis)
+	if err != nil {
+		t.Fatalf("failed to create connection: %v", err)
+	}
+	defer conn.Close()
+
+	client := protobuff.NewGroupCacheClient(conn)
+
+	t.Run("empty group name", func(t *testing.T) {
+		_, err := client.Get(context.Background(), &protobuff.Request{
+			Group: "",
+			Key:   "Tom",
+		})
+		if err == nil {
+			t.Errorf("expected error for empty group name")
 		}
 	})
 
-	_ = gee
+	t.Run("empty key", func(t *testing.T) {
+		_, err := client.Get(context.Background(), &protobuff.Request{
+			Group: groupName,
+			Key:   "",
+		})
+		if err == nil {
+			t.Errorf("expected error for empty key")
+		}
+	})
 }
 
 // ======================= 辅助函数：打印日志 =======================
 
 var (
 	_ = strings.TrimSpace // 避免未使用的导入警告
+	_ = url.QueryEscape
 )
