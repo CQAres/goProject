@@ -1,5 +1,7 @@
 package util
 
+import "sync"
+
 type ByteView struct {
 	B []byte
 }
@@ -28,4 +30,41 @@ type PeerPicker interface {
 
 type PeerGetter interface {
 	Get(group string, key string) ([]byte, error)
+}
+
+type call struct {
+	wg  sync.WaitGroup
+	val interface{}
+	err error
+}
+
+type Group struct {
+	mu    sync.Mutex
+	calls map[string]*call
+}
+
+func (g *Group) Do(key string, fn func() (interface{}, error)) (interface{}, error) {
+	g.mu.Lock()
+	if g.calls == nil {
+		g.calls = make(map[string]*call)
+	}
+	if c, ok := g.calls[key]; ok { // 如果前面有相同的请求正在执行,就等待
+		g.mu.Unlock()
+		c.wg.Wait()
+		return c.val, c.err
+	}
+
+	c := new(call)
+	c.wg.Add(1)
+	g.calls[key] = c
+	g.mu.Unlock()
+
+	c.val, c.err = fn()
+	c.wg.Done()
+
+	g.mu.Lock()
+	delete(g.calls, key)
+	g.mu.Unlock()
+
+	return c.val, c.err
 }

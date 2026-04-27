@@ -1,10 +1,35 @@
-package main
+package algorithm
 
 import (
 	"fmt"
 )
 
 // 二维前缀和
+func MatrixSum(matrix [][]int) [][]int {
+	rows := len(matrix)
+	cols := len(matrix[0])
+	ans := make([][]int, rows)
+	for i := range ans {
+		ans[i] = make([]int, cols)
+	}
+	for i := range rows {
+		for j := range cols {
+			ans[i][j] = matrix[i][j]
+			if i > 0 {
+				ans[i][j] += ans[i-1][j]
+			}
+			if j > 0 {
+				ans[i][j] += ans[i][j-1]
+			}
+			if i > 0 && j > 0 {
+				ans[i][j] -= ans[i-1][j-1]
+			}
+		}
+	}
+	return ans
+}
+
+// 二维前缀和查询
 func SumMatrixRegion(matrix [][]int, row1 int, col1 int, row2 int, col2 int) int {
 	matSum := matrix[row2][col2]
 	var right, left, up int
@@ -67,6 +92,69 @@ func minKBitFlips(nums []int, k int) int {
 			prefix++
 			diff[i+k]--
 			res++
+		}
+	}
+	return res
+}
+
+// 二维差分
+func rangeAddQueries(n int, queries [][]int) [][]int {
+	matrix := make([][]int, n)
+	for i := range matrix {
+		matrix[i] = make([]int, n)
+	}
+
+	for i := range queries {
+		x1 := queries[i][0]
+		y1 := queries[i][1]
+		x2 := queries[i][2]
+		y2 := queries[i][3]
+
+		matrix[x1][y1] += 1
+		if y2+1 < n {
+			matrix[x1][y2+1] -= 1
+		}
+		if x2+1 < n {
+			matrix[x2+1][y1] -= 1
+		}
+		if x2+1 < n && y2+1 < n {
+			matrix[x2+1][y2+1] += 1
+		}
+	}
+
+	for i := range n {
+		for j := range n {
+			if i > 0 {
+				matrix[i][j] += matrix[i-1][j]
+			}
+			if j > 0 {
+				matrix[i][j] += matrix[i][j-1]
+			}
+			if i > 0 && j > 0 {
+				matrix[i][j] -= matrix[i-1][j-1]
+			}
+		}
+	}
+	return matrix
+}
+
+func buildArray(target []int, n int) []string {
+	res := make([]string, 0)
+	i := 0
+	j := 1
+	for i < len(target) {
+		val := target[i]
+		if val == j {
+			res = append(res, "Push")
+			i++
+			j++
+		} else {
+			diff := val - j
+			for k := 0; k < diff; k++ {
+				res = append(res, "Push")
+				res = append(res, "Pop")
+			}
+			j += diff
 		}
 	}
 	return res
