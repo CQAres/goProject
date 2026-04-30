@@ -1,7 +1,8 @@
-package algorithm
+package main
 
 import (
 	"fmt"
+	"strings"
 )
 
 // 二维前缀和
@@ -160,7 +161,73 @@ func buildArray(target []int, n int) []string {
 	return res
 }
 
+func simplifyPath(path string) string {
+	tokens := strings.Split(path, "/")
+	res := make([]string, 0)
+	for i := range tokens {
+		ch := tokens[i]
+		switch ch {
+		case "":
+			continue
+		case ".":
+			continue
+		case "..":
+			if len(res) > 0 {
+				res = res[:len(res)-1]
+			}
+		default:
+			res = append(res, ch)
+		}
+	}
+	if len(res) == 0 {
+		return "/"
+	}
+	return "/" + strings.Join(res, "/")
+}
+
+func clearStars(s string) string {
+	ans := make([]byte, 0)
+	charSet := make([]int, 26)
+
+	for i := range s {
+		if s[i] == '*' {
+			if len(ans) == 0 {
+				continue
+			}
+
+			var minChar byte
+			for j := range charSet {
+				if charSet[j] > 0 {
+					minChar = byte(j) + 'a'
+					charSet[j]--
+					break
+				}
+			}
+
+			stack := make([]byte, 0)
+			for j := len(ans) - 1; j >= 0; j-- {
+				if ans[j] == minChar {
+					ans = ans[:j]
+					break
+				} else {
+					stack = append(stack, ans[j])
+				}
+			}
+
+			for j := len(stack) - 1; j >= 0; j-- {
+				ans = append(ans, stack[j])
+			}
+		} else {
+			ans = append(ans, s[i])
+			charSet[s[i]-'a']++
+		}
+	}
+	return string(ans)
+}
+
 func main() {
 	s := "gopher"
 	fmt.Printf("Hello and welcome, %s!\n", s)
+
+	fmt.Println(simplifyPath("/.../a/../b/c/../d/./"))
 }
