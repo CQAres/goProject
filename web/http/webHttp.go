@@ -7,12 +7,16 @@ import (
 
 // Engine is the uni handler for all requests
 type Engine struct {
+	*RouterGroup
 	router *router
+	groups []*RouterGroup
 }
 
 func NewEngine() *Engine {
 	return &Engine{
-		router: newRouter(),
+		router:      newRouter(),
+		RouterGroup: &RouterGroup{engine: NewEngine()},
+		groups:      make([]*RouterGroup, 0),
 	}
 }
 
