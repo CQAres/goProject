@@ -14,11 +14,17 @@ type Context struct {
 	Method     string
 	Params     map[string]string
 	StatusCode int
+	handlers   []HandlerFunc // 中间件
+	index      int
 }
 
 func (c *Context) params(key string) string {
 	value, _ := c.Params[key]
 	return value
+}
+
+func (c *Context) Param(key string) string {
+	return c.params(key)
 }
 
 func newContext(w http.ResponseWriter, req *http.Request) *Context {
@@ -28,10 +34,19 @@ func newContext(w http.ResponseWriter, req *http.Request) *Context {
 		Path:       req.URL.Path,
 		Method:     req.Method,
 		StatusCode: 200,
+		index:      -1,
 	}
 }
 
-func (c *Context) PostFrom(key string) string {
+func (c *Context) Next() {
+	c.index++
+	s := len(c.handlers)
+	for ; c.index < s; c.index++ {
+		c.handlers[c.index](c)
+	}
+}
+
+func (c *Context) PostForm(key string) string {
 	return c.Req.PostForm.Get(key)
 }
 
@@ -62,4 +77,13 @@ func (c *Context) HTML(code int, html string) {
 	if _, err := c.Writer.Write([]byte(html)); err != nil {
 		return
 	}
+}
+
+func (c *Context) Fail(serverError int, s string) {
+	c.SetHeader("Content-Type", "text/plain")
+	// Only write header if not already committed
+	if c.StatusCode == 200 {
+		c.Writer.WriteHeader(serverError)
+	}
+	_, _ = c.Writer.Write([]byte(s))
 }

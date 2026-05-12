@@ -11,7 +11,7 @@ func (group *RouterGroup) Group(prefix string) *RouterGroup {
 	engine := group.engine
 	newGroup := &RouterGroup{
 		prefix:      group.prefix + prefix,
-		middlewares: group.middlewares,
+		middlewares: make([]HandlerFunc, 0),
 		parent:      group,
 		engine:      engine,
 	}
@@ -30,4 +30,8 @@ func (group *RouterGroup) GET(pattern string, handler HandlerFunc) {
 
 func (group *RouterGroup) POST(pattern string, handler HandlerFunc) {
 	group.addRoute("POST", pattern, handler)
+}
+
+func (group *RouterGroup) Use(middlewares ...HandlerFunc) {
+	group.middlewares = append(group.middlewares, middlewares...)
 }
