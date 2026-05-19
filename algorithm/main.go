@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -47,6 +48,11 @@ func SumMatrixRegion(matrix [][]int, row1 int, col1 int, row2 int, col2 int) int
 }
 
 // 差分
+// 数组 [1, 3, 3, 5, 8]
+// 对其补上第0位做差分可以得到数组 [1, 2, 0, 2, 3]
+// 差分数组的前缀和就等于原数组, 即 [1, 3, 3, 5, 8]
+// 对原数组某个区间进行加减操作,只需对其差分数组的端点做加减操作
+// 即 [1, 2+3, 0, 2, 3-3] -> [1, 5, 0, 2, 0] -> [1, 6, 6, 8, 8]
 func isZeroArray(nums []int, queries [][]int) bool {
 	nNum := len(nums)
 	coverNum := make([]int, nNum)
@@ -223,6 +229,31 @@ func clearStars(s string) string {
 		}
 	}
 	return string(ans)
+}
+
+func exclusiveTime(n int, logs []string) []int {
+	res := make([]int, n)
+	stack := make([]int, 0)
+	prevTime := 0
+	for i := range logs {
+		log := logs[i]
+		tokens := strings.Split(log, ":")
+		id, _ := strconv.Atoi(tokens[0])
+		action := tokens[1]
+		time, _ := strconv.Atoi(tokens[2])
+		if action == "start" {
+			if len(stack) > 0 {
+				res[stack[len(stack)-1]] += time - prevTime
+			}
+			stack = append(stack, id)
+			prevTime = time
+		} else {
+			res[stack[len(stack)-1]] += time - prevTime + 1
+			stack = stack[:len(stack)-1]
+			prevTime = time + 1
+		}
+	}
+	return res
 }
 
 func main() {
