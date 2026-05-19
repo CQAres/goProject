@@ -1,7 +1,7 @@
 package http
 
 import (
-	"goProject/web/http/trie"
+	"goProject/web/trie"
 	"log"
 	"net/http"
 	"strings"

@@ -1,7 +1,6 @@
 package http
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 )
@@ -39,6 +38,7 @@ func (e *Engine) Run(addr string) (err error) {
 	return http.ListenAndServe(addr, e)
 }
 
+// Go 的 net/http 包中，只要你的类型实现了 http.Handler 接口 （该接口只有一个方法 ServeHTTP(w http.ResponseWriter, r *http.Request)） 就可以将它作为 HTTP 服务器的处理器来拦截所有请求
 func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	var middlewares []HandlerFunc
 	for _, group := range e.groups {
@@ -49,15 +49,4 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	c := newContext(w, req)
 	c.handlers = middlewares
 	e.router.handle(c)
-}
-
-//	Go 的 net/http 包中，只要你的类型实现了 http.Handler 接口 （该接口只有一个方法 ServeHTTP(w http.ResponseWriter, r *http.Request)） 就可以将它作为 HTTP 服务器的处理器来拦截所有请求
-
-func main() {
-	engine := NewEngine()
-	err := engine.Run("9999")
-	if err != nil {
-		fmt.Printf("run err: %v\n", err)
-		return
-	}
 }
