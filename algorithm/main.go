@@ -256,6 +256,38 @@ func exclusiveTime(n int, logs []string) []int {
 	return res
 }
 
+func robotWithString(s string) string {
+	res := make([]byte, 0)
+	stack := make([]byte, 0)
+	chMap := make([]int, 26)
+	for i := range s {
+		ch := s[i]
+		chMap[ch-'a']++
+	}
+
+	minChar := 0
+
+	for i := range s {
+		ch := s[i]
+		chMap[ch-'a']--
+		for minChar < 25 && chMap[minChar] == 0 {
+			minChar++
+		}
+		stack = append(stack, ch)
+
+		for len(stack) > 0 && int(stack[len(stack)-1]-'a') <= minChar {
+			res = append(res, stack[len(stack)-1])
+			stack = stack[:len(stack)-1]
+		}
+	}
+
+	for len(stack) > 0 {
+		res = append(res, stack[len(stack)-1])
+		stack = stack[:len(stack)-1]
+	}
+	return string(res)
+}
+
 func main() {
 	s := "gopher"
 	fmt.Printf("Hello and welcome, %s!\n", s)
