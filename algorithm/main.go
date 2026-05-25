@@ -288,9 +288,61 @@ func robotWithString(s string) string {
 	return string(res)
 }
 
+func minLength(s string) int {
+	str := s
+	tmp := make([]byte, 0)
+	bIsRemove := true
+	for bIsRemove {
+		bIsRemove = false
+		tmp = tmp[:0]
+		for i := range str {
+			ch := str[i]
+			if len(tmp) > 0 {
+				if ch == 'B' && tmp[len(tmp)-1] == 'A' {
+					tmp = tmp[:len(tmp)-1]
+					bIsRemove = true
+					continue
+				} else if ch == 'D' && tmp[len(tmp)-1] == 'C' {
+					tmp = tmp[:len(tmp)-1]
+					bIsRemove = true
+					continue
+				}
+			}
+			tmp = append(tmp, ch)
+		}
+		str = string(tmp)
+	}
+	return len(str)
+}
+
+func resultingString(s string) string {
+	stack := make([]byte, 0)
+	stTop := -1
+	for i := range s {
+		ch := s[i]
+		if stTop >= 0 {
+			stCh := stack[stTop]
+			diff := ch - stCh
+			if diff == 1 || diff == 255 {
+				stack = stack[:stTop]
+				stTop--
+				continue
+			}
+			if diff == 25 || diff == 231 {
+				stack = stack[:stTop]
+				stTop--
+				continue
+			}
+		}
+		stack = append(stack, ch)
+		stTop++
+	}
+	return string(stack)
+}
+
 func main() {
 	s := "gopher"
 	fmt.Printf("Hello and welcome, %s!\n", s)
 
-	fmt.Println(simplifyPath("/.../a/../b/c/../d/./"))
+	fmt.Println(resultingString("adcb"))
 }

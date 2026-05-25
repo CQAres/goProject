@@ -2,6 +2,7 @@ package main
 
 import "C"
 import (
+	"context"
 	"fmt"
 	client2 "goProject/RPC/client"
 	"goProject/RPC/service"
@@ -12,13 +13,30 @@ import (
 	"time"
 )
 
+type Compute int
+type Args struct {
+	Num1, Num2 int
+}
+
+func (c *Compute) Sum(args Args, reply *int) error {
+	*reply = args.Num1 + args.Num2
+	return nil
+}
+
 // startServer 启动 RPC 服务端，随机监听可用端口，通过 addr 通道返回监听地址
 func startServer(addr chan string) {
+
+	var c Compute
+	if err := service.Register(&c); err != nil {
+		log.Fatal("register error:", err)
+	}
+
 	// pick a free port
 	listen, err := net.Listen("tcp", ":0")
 	if err != nil {
 		log.Fatal("network error:", err)
 	}
+
 	log.Println("start rpc server on", listen.Addr())
 	addr <- listen.Addr().String()
 	service.Accept(listen)
@@ -43,16 +61,19 @@ func main() {
 			defer wg.Done()
 
 			request := fmt.Sprintf("go rpc req %d", i)
-			log.Println("request:", request)
-			args := &service.Args{
-				Req: request,
-				A:   rand.Intn(100),
-				B:   rand.Intn(100),
+			args := &Args{
+				Num1: rand.Intn(100),
+				Num2: rand.Intn(100),
 			}
-			var reply string
-			if err := client.Call("Func.Sum", args, &reply); err != nil {
-				log.Fatal("call Func.Sum error:", err)
+			log.Println("request:", request, "args:", args)
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+			defer cancel()
+			var reply int
+			if err := client.Call(ctx, "Compute.Sum", args, &reply); err != nil {
+				log.Fatal("call Compute.Sum error:", err)
 			}
+
 			log.Println("reply:", reply)
 		}(i)
 	}
