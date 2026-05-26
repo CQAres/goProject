@@ -191,46 +191,6 @@ func simplifyPath(path string) string {
 	return "/" + strings.Join(res, "/")
 }
 
-func clearStars(s string) string {
-	ans := make([]byte, 0)
-	charSet := make([]int, 26)
-
-	for i := range s {
-		if s[i] == '*' {
-			if len(ans) == 0 {
-				continue
-			}
-
-			var minChar byte
-			for j := range charSet {
-				if charSet[j] > 0 {
-					minChar = byte(j) + 'a'
-					charSet[j]--
-					break
-				}
-			}
-
-			stack := make([]byte, 0)
-			for j := len(ans) - 1; j >= 0; j-- {
-				if ans[j] == minChar {
-					ans = ans[:j]
-					break
-				} else {
-					stack = append(stack, ans[j])
-				}
-			}
-
-			for j := len(stack) - 1; j >= 0; j-- {
-				ans = append(ans, stack[j])
-			}
-		} else {
-			ans = append(ans, s[i])
-			charSet[s[i]-'a']++
-		}
-	}
-	return string(ans)
-}
-
 func exclusiveTime(n int, logs []string) []int {
 	res := make([]int, n)
 	stack := make([]int, 0)
@@ -256,93 +216,47 @@ func exclusiveTime(n int, logs []string) []int {
 	return res
 }
 
-func robotWithString(s string) string {
-	res := make([]byte, 0)
-	stack := make([]byte, 0)
-	chMap := make([]int, 26)
+// 压缩栈
+func removeSubstring(s string, k int) string {
+
+	type pair struct {
+		ch  byte
+		num int
+	}
+
+	stack := make([]pair, 0)
 	for i := range s {
-		ch := s[i]
-		chMap[ch-'a']++
-	}
-
-	minChar := 0
-
-	for i := range s {
-		ch := s[i]
-		chMap[ch-'a']--
-		for minChar < 25 && chMap[minChar] == 0 {
-			minChar++
+		if len(stack) > 0 && stack[len(stack)-1].ch == s[i] {
+			stack[len(stack)-1].num++
+		} else {
+			stack = append(stack, pair{s[i], 1})
 		}
-		stack = append(stack, ch)
 
-		for len(stack) > 0 && int(stack[len(stack)-1]-'a') <= minChar {
-			res = append(res, stack[len(stack)-1])
-			stack = stack[:len(stack)-1]
-		}
-	}
-
-	for len(stack) > 0 {
-		res = append(res, stack[len(stack)-1])
-		stack = stack[:len(stack)-1]
-	}
-	return string(res)
-}
-
-func minLength(s string) int {
-	str := s
-	tmp := make([]byte, 0)
-	bIsRemove := true
-	for bIsRemove {
-		bIsRemove = false
-		tmp = tmp[:0]
-		for i := range str {
-			ch := str[i]
-			if len(tmp) > 0 {
-				if ch == 'B' && tmp[len(tmp)-1] == 'A' {
-					tmp = tmp[:len(tmp)-1]
-					bIsRemove = true
-					continue
-				} else if ch == 'D' && tmp[len(tmp)-1] == 'C' {
-					tmp = tmp[:len(tmp)-1]
-					bIsRemove = true
-					continue
+		if s[i] == ')' && len(stack) >= 2 {
+			n := len(stack)
+			rightCnt := stack[n-1].num
+			leftCnt := stack[n-2].num
+			if leftCnt >= k && rightCnt == k {
+				stack = stack[:n-1]
+				stack[len(stack)-1].num -= k
+				if stack[len(stack)-1].num == 0 {
+					stack = stack[:len(stack)-1]
 				}
 			}
-			tmp = append(tmp, ch)
 		}
-		str = string(tmp)
 	}
-	return len(str)
-}
 
-func resultingString(s string) string {
-	stack := make([]byte, 0)
-	stTop := -1
-	for i := range s {
-		ch := s[i]
-		if stTop >= 0 {
-			stCh := stack[stTop]
-			diff := ch - stCh
-			if diff == 1 || diff == 255 {
-				stack = stack[:stTop]
-				stTop--
-				continue
-			}
-			if diff == 25 || diff == 231 {
-				stack = stack[:stTop]
-				stTop--
-				continue
-			}
+	res := make([]byte, 0)
+	for i := range stack {
+		for j := 0; j < stack[i].num; j++ {
+			res = append(res, stack[i].ch)
 		}
-		stack = append(stack, ch)
-		stTop++
 	}
-	return string(stack)
+	return string(res)
 }
 
 func main() {
 	s := "gopher"
 	fmt.Printf("Hello and welcome, %s!\n", s)
 
-	fmt.Println(resultingString("adcb"))
 }
