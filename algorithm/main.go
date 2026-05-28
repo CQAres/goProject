@@ -275,19 +275,16 @@ func removeOuterParentheses(s string) string {
 	return string(res)
 }
 
-func scoreOfParentheses(s string) int {
-	st := make([]int, 0)
-	st = append(st, 0)
-	for _, c := range s {
-		if c == '(' {
-			st = append(st, 0)
+func minSwaps(s string) int {
+	stack := make([]byte, 0)
+	for i := range s {
+		if len(stack) > 0 && stack[len(stack)-1] == '[' && s[i] == ']' {
+			stack = stack[:len(stack)-1]
 		} else {
-			v := st[len(st)-1]
-			st = st[:len(st)-1]
-			st[len(st)-1] += max(2*v, 1)
+			stack = append(stack, s[i])
 		}
 	}
-	return st[0]
+	return (len(stack) + 2) / 4
 }
 
 func main() {
