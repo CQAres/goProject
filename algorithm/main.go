@@ -255,6 +255,41 @@ func removeSubstring(s string, k int) string {
 	return string(res)
 }
 
+func removeOuterParentheses(s string) string {
+	var res []byte
+	count := 0
+
+	for i := 0; i < len(s); i++ {
+		if s[i] == '(' {
+			if count > 0 {
+				res = append(res, s[i])
+			}
+			count++
+		} else {
+			count--
+			if count > 0 {
+				res = append(res, s[i])
+			}
+		}
+	}
+	return string(res)
+}
+
+func scoreOfParentheses(s string) int {
+	st := make([]int, 0)
+	st = append(st, 0)
+	for _, c := range s {
+		if c == '(' {
+			st = append(st, 0)
+		} else {
+			v := st[len(st)-1]
+			st = st[:len(st)-1]
+			st[len(st)-1] += max(2*v, 1)
+		}
+	}
+	return st[0]
+}
+
 func main() {
 	s := "gopher"
 	fmt.Printf("Hello and welcome, %s!\n", s)
