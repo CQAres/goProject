@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -255,79 +256,102 @@ func removeSubstring(s string, k int) string {
 	return string(res)
 }
 
-func removeOuterParentheses(s string) string {
-	var res []byte
-	count := 0
+// 单调队列
+func maxSlidingWindow(nums []int, k int) []int {
+	ans := make([]int, len(nums)-k+1) // 窗口个数
+	var q []int
 
-	for i := 0; i < len(s); i++ {
-		if s[i] == '(' {
-			if count > 0 {
-				res = append(res, s[i])
-			}
-			count++
-		} else {
-			count--
-			if count > 0 {
-				res = append(res, s[i])
-			}
+	for i, x := range nums {
+		// 1. 右边入
+		for len(q) > 0 && nums[q[len(q)-1]] <= x {
+			q = q[:len(q)-1]
+		}
+		q = append(q, i)
+
+		// 2. 左边出
+		left := i - k + 1
+		if q[0] < left {
+			q = q[1:]
+		}
+
+		// 3. 在窗口左端点处记录答案
+		if left >= 0 {
+			ans[left] = nums[q[0]]
 		}
 	}
-	return string(res)
-}
 
-type FrontMiddleBackQueue struct {
-	queue []int
-}
-
-func Constructor() FrontMiddleBackQueue {
-	return FrontMiddleBackQueue{
-		queue: make([]int, 0),
-	}
-}
-
-func (this *FrontMiddleBackQueue) PushFront(val int) {
-	this.queue = append([]int{val}, this.queue...)
-}
-
-func (this *FrontMiddleBackQueue) PushMiddle(val int) {
-	mid := (len(this.queue)) / 2
-	this.queue = append(this.queue[:mid], append([]int{val}, this.queue[mid:]...)...)
-}
-
-func (this *FrontMiddleBackQueue) PushBack(val int) {
-	this.queue = append(this.queue, val)
-}
-
-func (this *FrontMiddleBackQueue) PopFront() int {
-	if len(this.queue) == 0 {
-		return -1
-	}
-	res := this.queue[0]
-	this.queue = this.queue[1:]
-	return res
-}
-
-func (this *FrontMiddleBackQueue) PopMiddle() int {
-	if len(this.queue) == 0 {
-		return -1
-	}
-	mid := (len(this.queue) - 1) / 2
-	res := this.queue[mid]
-	this.queue = append(this.queue[:mid], this.queue[mid+1:]...)
-	return res
-}
-
-func (this *FrontMiddleBackQueue) PopBack() int {
-	if len(this.queue) == 0 {
-		return -1
-	}
-	res := this.queue[len(this.queue)-1]
-	this.queue = this.queue[:len(this.queue)-1]
-	return res
+	return ans
 }
 
 func main() {
 	s := "gopher"
 	fmt.Printf("Hello and welcome, %s!\n", s)
 
+}
+
+type Pack struct {
+	source      int
+	destination int
+	timestamp   int
+}
+type Router struct {
+	queue           []Pack
+	size            int
+	hashPack        map[Pack]struct{}
+	hashDestination map[int][]int
+}
+
+func Constructor(memoryLimit int) Router {
+	return Router{
+		queue:           make([]Pack, 0),
+		size:            memoryLimit,
+		hashPack:        make(map[Pack]struct{}),
+		hashDestination: make(map[int][]int),
+	}
+}
+
+func (this *Router) AddPacket(source int, destination int, timestamp int) bool {
+	pack := Pack{source, destination, timestamp}
+
+	_, exit := this.hashPack[pack]
+	if exit {
+		return false
+	}
+
+	if len(this.queue) >= this.size {
+		oldPack := this.queue[0]
+		delete(this.hashPack, oldPack)
+		this.queue = this.queue[1:]
+		this.hashDestination[oldPack.destination] = this.hashDestination[oldPack.destination][1:]
+	}
+
+	this.queue = append(this.queue, pack)
+	this.hashPack[pack] = struct{}{}
+	this.hashDestination[pack.destination] = append(this.hashDestination[pack.destination], timestamp)
+
+	return true
+}
+
+func (this *Router) ForwardPacket() []int {
+	if len(this.queue) == 0 {
+		return []int{}
+	}
+
+	pack := this.queue[0]
+	this.queue = this.queue[1:]
+	this.hashDestination[pack.destination] = this.hashDestination[pack.destination][1:]
+	delete(this.hashPack, pack)
+
+	return []int{pack.source, pack.destination, pack.timestamp}
+}
+
+func (this *Router) GetCount(destination int, startTime int, endTime int) int {
+	timeStamps := this.hashDestination[destination]
+	if len(timeStamps) == 0 {
+		return 0
+	}
+
+	left := sort.SearchInts(timeStamps, startTime)
+	right := sort.SearchInts(timeStamps, endTime+1)
+	return right - left
 }
