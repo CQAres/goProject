@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -283,75 +282,57 @@ func maxSlidingWindow(nums []int, k int) []int {
 	return ans
 }
 
+type PriorityQueue []*int
+
+func (pq PriorityQueue) Len() int {
+	return len(pq)
+}
+
+func (pq PriorityQueue) Less(i, j int) bool {
+	return *pq[i] > *pq[j]
+}
+
+func (pq PriorityQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+}
+
+func (pq *PriorityQueue) Push(x any) {
+	item := x.(*int)
+	*pq = append(*pq, item)
+}
+
+func (pq *PriorityQueue) Pop(interface{}) any {
+	old := *pq
+	n := len(old)
+	res := old[n-1]
+	old[n-1] = nil
+	*pq = old[:n-1]
+	return res
+}
+
+func climbStairs(n int, costs []int) int {
+	if n == 0 {
+		return 0
+	}
+
+	dp := make([]int, n+1)
+	dp[0] = 0
+
+	for i := 1; i <= n; i++ {
+		dp[i] = costs[i-1] + 1 + dp[i-1]
+
+		if i >= 2 {
+			dp[i] = min(dp[i], costs[i-1]+4+dp[i-2])
+		}
+		if i >= 3 {
+			dp[i] = min(dp[i], costs[i-1]+9+dp[i-3])
+		}
+	}
+	return dp[n]
+}
+
 func main() {
 	s := "gopher"
 	fmt.Printf("Hello and welcome, %s!\n", s)
 
-}
-
-type Pack struct {
-	source      int
-	destination int
-	timestamp   int
-}
-type Router struct {
-	queue           []Pack
-	size            int
-	hashPack        map[Pack]struct{}
-	hashDestination map[int][]int
-}
-
-func Constructor(memoryLimit int) Router {
-	return Router{
-		queue:           make([]Pack, 0),
-		size:            memoryLimit,
-		hashPack:        make(map[Pack]struct{}),
-		hashDestination: make(map[int][]int),
-	}
-}
-
-func (this *Router) AddPacket(source int, destination int, timestamp int) bool {
-	pack := Pack{source, destination, timestamp}
-
-	_, exit := this.hashPack[pack]
-	if exit {
-		return false
-	}
-
-	if len(this.queue) >= this.size {
-		oldPack := this.queue[0]
-		delete(this.hashPack, oldPack)
-		this.queue = this.queue[1:]
-		this.hashDestination[oldPack.destination] = this.hashDestination[oldPack.destination][1:]
-	}
-
-	this.queue = append(this.queue, pack)
-	this.hashPack[pack] = struct{}{}
-	this.hashDestination[pack.destination] = append(this.hashDestination[pack.destination], timestamp)
-
-	return true
-}
-
-func (this *Router) ForwardPacket() []int {
-	if len(this.queue) == 0 {
-		return []int{}
-	}
-
-	pack := this.queue[0]
-	this.queue = this.queue[1:]
-	this.hashDestination[pack.destination] = this.hashDestination[pack.destination][1:]
-	delete(this.hashPack, pack)
-
-	return []int{pack.source, pack.destination, pack.timestamp}
-}
-
-func (this *Router) GetCount(destination int, startTime int, endTime int) int {
-	timeStamps := this.hashDestination[destination]
-	if len(timeStamps) == 0 {
-		return 0
-	}
-
-	left := sort.SearchInts(timeStamps, startTime)
-	right := sort.SearchInts(timeStamps, endTime+1)
-	return right - left
 }
